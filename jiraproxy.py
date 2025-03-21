@@ -162,7 +162,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         cleaned_summary = summary.strip()
 
         if summary:
-            # Extracting the estimates block in square brackets
+            # Extracting the estimates in square brackets
             match_square = re.search(r'^([^\[]{0,3}?)\[([^\]]+)\]', summary)
             match_round = None
             if match_square:
@@ -175,7 +175,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                         if group in resource_groups:
                             estimates[group] = int(value)
 
-                # The round brackets block immediately after the square brackets
+                # The round brackets immediately after the square brackets
                 remaining_estimates_start = match_square.end()
                 if remaining_estimates_start < len(summary) and summary[remaining_estimates_start] == '(':
                     match_round = re.search(r'\(([^\)]+)\)', summary[remaining_estimates_start:])
@@ -200,7 +200,6 @@ class RequestHandler(BaseHTTPRequestHandler):
 
         return estimates, remaining_estimates, prefix, cleaned_summary
 
-    @staticmethod
     def reconstruct_summary(self, issue):
         prefix = issue.get('prefix', '')
         estimates = issue.get('estimates', {})
