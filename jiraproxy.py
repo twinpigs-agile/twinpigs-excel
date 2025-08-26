@@ -1,11 +1,13 @@
 import asyncio
 import json
 import argparse
+import sys
 import re
 import logging
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlparse, parse_qs, urlencode
 import aiohttp
+from base64 import b64encode
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -92,6 +94,12 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(json.dumps({'updated_keys': keys_to_update}).encode('utf-8'))
 
+    def get_headers(self):
+        return {
+            'Authorization': f'Bearer {self.server.token}' if self.server.token else ('Basic ' + b64encode(f"{self.server.user}:{self.server.password}".encode()).decode()),
+            'Content-Type': 'application/json'
+        }
+
     async def update_jira_summary(self, key, summary):
         jira_url = f'{self.server.jira_server}/rest/api/2/issue/{key}'
         data = {
@@ -99,20 +107,14 @@ class RequestHandler(BaseHTTPRequestHandler):
                 'summary': summary
             }
         }
-        headers = {
-            'Authorization': f'Bearer {self.server.token}',
-            'Content-Type': 'application/json'
-        }
+        headers = self.get_headers()
         async with aiohttp.ClientSession() as session:
             async with session.put(jira_url, json=data, headers=headers) as resp:
                 if resp.status != 204:
                     logging.error(f"Failed to update summary for {key}: {resp.status}")
 
     async def call_external_api(self, url, data=None):
-        headers = {
-            'Authorization': f'Bearer {self.server.token}',
-            'Content-Type': 'application/json'
-        }
+        headers = self.get_headers()
         async with aiohttp.ClientSession() as session:
             if data:
                 async with session.post(url, json=data, headers=headers) as resp:
@@ -125,7 +127,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             else:
                 async with session.get(url, headers=headers) as resp:
                     if resp.status != 200:
-                        raise Exception("Jira GET failed")
+                        raise Exception(f"Jira GET failed: {self.server.user}, {self.server.password}  url={url}\nstatus={resp.status}\nheaders={headers}\nbody={await resp.read()}")
                     response = await resp.json()
                     logging.info(f"Called external API with GET to {url}, received response: {response}")
                     return response
@@ -225,13 +227,15 @@ class RequestHandler(BaseHTTPRequestHandler):
         return f'{prefix}{estimates_str}{remaining_estimates_str} {summary}'.strip()
 
 
-def run(jira_server, port, token):
+def run(jira_server, port, token, user, password):
     # We accept only local connections to avoid creating a serious vulnerability.
     # Of course, a local malicious app still may access you Jira through the interface,
     # but that is still much better than opening access to remote hosts. :-)
     server_address = ('localhost', port)
     httpd = HTTPServer(server_address, RequestHandler)
     httpd.token = token
+    httpd.user = user
+    httpd.password = password
     httpd.jira_server = jira_server
     logging.info(f'Starting httpd server on port {port}')
     httpd.serve_forever()
@@ -241,8 +245,17 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description='Jira Proxy for Twin Pigs Jira Integrator v4')
     parser.add_argument('--port', type=int, default=8080, help='Specify the HTTP port to listen')
-    parser.add_argument('--token', type=str, required=True, help='Jira API personal access token to use API')
+    parser.add_argument('--token', type=str, help='Jira API personal access token to use API')
+    parser.add_argument('--user', type=str, help='Username for basic Jira API auth (obsolete, not recommended)')
+    parser.add_argument('--password', type=str, help='Password for basic Jira API auth (obsolete, not recommended)')
     parser.add_argument('--jira', type=str, required=True, help='Jira server URL')
     args = parser.parse_args()
+    if args.token:
+        if args.user or args.password:
+            print("You don't need --user and --password if you specify --token", file=sys.stderr)
+            exit(1)
+    else:
+        if not (args.user and args.password):
+            print("You need to specify --user and --password if you do not specify --token", file=sys.stderr)
 
-    run(jira_server=args.jira, port=args.port, token=args.token)
+    run(jira_server=args.jira, port=args.port, token=args.token, user=args.user, password=args.password)
