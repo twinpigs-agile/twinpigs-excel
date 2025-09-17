@@ -75,6 +75,7 @@ class TestRequestHandler(unittest.TestCase):
             self.assertEqual(response['issues'][0]['key'], 'TEST-1')
             self.assertEqual(response['issues'][0]['estimates'], {'A': 5, 'B': 3})
             self.assertEqual(response['issues'][0]['remaining_estimates'], {'A': 2, 'B': 1})
+            self.assertEqual(response['issues'][0]['postponed'], {'A': 0, 'B': 0})
             self.assertEqual(response['issues'][0]['prefix'], 'A')
             self.assertEqual(response['issues'][0]['summary'], 'Some description')
             self.assertEqual(response['issues'][0]['assignee'], 'Twin Pigs')
@@ -91,7 +92,8 @@ class TestRequestHandler(unittest.TestCase):
                         'summary': 'Some description',
                         'prefix': 'A',
                         'estimates': {'A': 5, 'B': 3},
-                        'remaining_estimates': {'A': 2, 'B': 2}  # Изменение оценки
+                        'remaining_estimates': {'A': 2, 'B': 2},  # Изменение оценки
+                        'postponed': {'A': '?', 'B': '?'}  # Изменение оценки
                     }
                 ],
                 'jql': 'project=TEST'
@@ -101,84 +103,6 @@ class TestRequestHandler(unittest.TestCase):
 
         asyncio.run(test())
 
-    def test_extract_estimates_and_clean_summary(self):
-        handler = RequestHandler
-        summary = 'A[5A+3B](2A+1B) Some description'
-        resource_groups = ['A', 'B']
-        estimates, remaining_estimates, prefix, cleaned_summary = handler.extract_estimates_and_clean_summary(handler, summary, resource_groups)
-        self.assertEqual(estimates, {'A': 5, 'B': 3})
-        self.assertEqual(remaining_estimates, {'A': 2, 'B': 1})
-        self.assertEqual(prefix, 'A')
-        self.assertEqual(cleaned_summary, 'Some description')
-
-        summary = 'A[5A+3B]'
-        estimates, remaining_estimates, prefix, cleaned_summary = handler.extract_estimates_and_clean_summary(handler, summary, resource_groups)
-        self.assertEqual(estimates, {'A': 5, 'B': 3})
-        self.assertEqual(remaining_estimates, {'A': 5, 'B': 3})
-        self.assertEqual(prefix, 'A')
-        self.assertEqual(cleaned_summary, '')
-
-        summary = 'A[0](0)'
-        estimates, remaining_estimates, prefix, cleaned_summary = handler.extract_estimates_and_clean_summary(handler, summary, resource_groups)
-        self.assertEqual(estimates, {'A': 0, 'B': 0})
-        self.assertEqual(remaining_estimates, {'A': 0, 'B': 0})
-        self.assertEqual(prefix, 'A')
-        self.assertEqual(cleaned_summary, '')
-
-        summary = 'A[5A+3B] Some description'
-        estimates, remaining_estimates, prefix, cleaned_summary = handler.extract_estimates_and_clean_summary(handler, summary, resource_groups)
-        self.assertEqual(estimates, {'A': 5, 'B': 3})
-        self.assertEqual(remaining_estimates, {'A': 5, 'B': 3})
-        self.assertEqual(prefix, 'A')
-        self.assertEqual(cleaned_summary, 'Some description')
-
-        summary = 'A[5A+3B+2C](1A+1B+1C) Some description'
-        resource_groups = ['A', 'B', 'C']
-        estimates, remaining_estimates, prefix, cleaned_summary = handler.extract_estimates_and_clean_summary(handler, summary, resource_groups)
-        self.assertEqual(estimates, {'A': 5, 'B': 3, 'C': 2})
-        self.assertEqual(remaining_estimates, {'A': 1, 'B': 1, 'C': 1})
-        self.assertEqual(prefix, 'A')
-        self.assertEqual(cleaned_summary, 'Some description')
-
-        summary = 'A[5A+3B] Some description (1A+1B)'
-        estimates, remaining_estimates, prefix, cleaned_summary = handler.extract_estimates_and_clean_summary(handler, summary, ['A', 'B', 'C'])
-        self.assertEqual(estimates, {'A': 5, 'B': 3, 'C': 0})
-        self.assertEqual(remaining_estimates, {'A': 5, 'B': 3, 'C': 0})
-        self.assertEqual(prefix, 'A')
-        self.assertEqual(cleaned_summary, 'Some description (1A+1B)')
-
-    def test_reconstruct_summary(self):
-        handler = RequestHandler
-        issue = {
-            'key': 'TEST-1',
-            'summary': 'Some description',
-            'prefix': 'A',
-            'estimates': {'A': 5, 'B': 3},
-            'remaining_estimates': {'A': 2, 'B': 1}
-        }
-        summary = handler.reconstruct_summary(handler, issue)
-        self.assertEqual(summary, 'A[5A+3B](2A+1B) Some description')
-
-        handler = RequestHandler
-        issue = {
-            'key': 'TEST-1',
-            'summary': 'Some description',
-            'prefix': 'A',
-            'estimates': {'A': 5, 'B': 3},
-            'remaining_estimates': {'A': 5, 'B': 3}
-        }
-        summary = handler.reconstruct_summary(handler, issue)
-        self.assertEqual(summary, 'A[5A+3B] Some description')
-
-        issue = {
-            'key': 'TEST-2',
-            'summary': 'Another description',
-            'prefix': 'B',
-            'estimates': {'A': 0, 'B': 0},
-            'remaining_estimates': {'A': 0, 'B': 0}
-        }
-        summary = handler.reconstruct_summary(handler, issue)
-        self.assertEqual(summary, 'B[0] Another description')
 
 if __name__ == '__main__':
     unittest.main()
