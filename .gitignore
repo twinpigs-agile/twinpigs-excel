@@ -175,3 +175,5 @@ cython_debug/
 
 #PyCharm
 .idea/
+.idea/*.xml
+.idea/*.iml
