@@ -6,7 +6,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Thread
 from urllib.parse import urlparse
 from aiohttp import ClientSession
-from jiraproxy import RequestHandler, run
+from twinpigs_jira_driver import RequestHandler, run
 
 class FakeJiraHandler(BaseHTTPRequestHandler):
     def do_GET(self):

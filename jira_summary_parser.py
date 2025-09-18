@@ -126,6 +126,12 @@ def encode_summary(group_names, summary_dict):
         >>> encode_summary(['A', 'B', 'C'], {'prefix': 'abc', 'estimates': {'A': 10, 'B': 0, 'C': 0, 'M': 20}, 'remaining_estimates': {'A': 30, 'B': 0, 'C': 0, 'M': 40}, 'postponed': {'A': 50, 'B': 0, 'C': 0, 'M': 60}, 'summary': 'Some summary text'})
         'abc[10A](30A){50A}Some summary text'
 
+        >>> encode_summary(['A', 'B', 'C'], {'prefix': 'abc', 'estimates': {'A': 10, 'B': 20}, 'remaining_estimates': {'A': 30, 'B': 40}, 'postponed': {'A': 50, 'B': 60}, 'summary': 'Some summary text'})
+        'abc[10A+20B](30A+40B){50A+60B}Some summary text'
+
+        >>> encode_summary(['A', 'B', 'C'], {'prefix': 'abc', 'estimates': {'A': 10}, 'remaining_estimates': {'A': 30}, 'postponed': {'A': 50}, 'summary': 'Some summary text'})
+        'abc[10A](30A){50A}Some summary text'
+
         >>> summary_dict = {'prefix': 'abc', 'estimates': {'A': 10, 'B': 20, 'C': 0}, 'remaining_estimates': {'A': 30, 'B': 40, 'C': 0}, 'postponed': {'A': 50, 'B': 60, 'C': 0}, 'summary': 'Some summary text'}
         >>> parse_summary(['A', 'B', 'C'], encode_summary(['A', 'B', 'C'], summary_dict)) == summary_dict
         True
@@ -159,13 +165,13 @@ def encode_summary(group_names, summary_dict):
         True
     """
     def encode_block(block_dict):
-        values = [block_dict[name] for name in group_names]
+        values = [block_dict.get(name, 0) for name in group_names]
         if all(v == 0 for v in values):
             return '0'
         elif all(v == '?' for v in values):
             return '?'
         else:
-            return '+'.join(f'{block_dict[name]}{name}' for name in group_names if block_dict[name] != 0)
+            return '+'.join(f'{block_dict.get(name, 0)}{name}' for name in group_names if block_dict.get(name, 0) != 0)
 
     prefix = summary_dict.get('prefix', '')
     estimates = summary_dict.get('estimates', {name: '?' for name in group_names})
@@ -182,3 +188,7 @@ def encode_summary(group_names, summary_dict):
     result += summary
 
     return result
+
+if __name__ == "__main__":
+    import doctest
+    doctest.testmod()

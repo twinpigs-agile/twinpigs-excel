@@ -38,6 +38,7 @@ function date_from_excel(dateVal: string | number | boolean): Date {
 
 function date_to_string(dateVal: number): string {
     let d = new Date(Math.round((dateVal - 25569) * 86400 * 1000));
+    //return `.${d.getMonth()}.${d.getFullYear()}`
     return d.toLocaleDateString();
 }
 
@@ -47,6 +48,11 @@ function type_check(t: string, value: number | string | boolean, ref: string = n
     if (ref)
         throw new Error(`The value in [${ref}] should be of type ${t}, not ${typeof (value)}`)
     throw new Error(`The value [{$value}] should be of type ${t}, not ${typeof (value)}`)
+}
+
+function ensure_string(value: number | string | boolean, ref: string = null): string {
+    type_check("string", value, ref);
+    return value as string;
 }
 
 function ensure_number(value: number | string | boolean, ref: string = null): number {
@@ -108,6 +114,10 @@ function read_config(sheet: ExcelScript.Worksheet): Array<Array<number | string 
     return sheet.getRange(CONFIG_RANGE).getValues();
 }
 
+function read_current_config(wb: ExcelScript.Workbook): Array<Array<number | string | boolean>> {
+    let sheet = wb.getActiveWorksheet();
+    return read_config(sheet);
+}
 
 function get_config_value(cfg: Array<Array<number | string | boolean>>, name: string, t: string, array_length: number = null, check: (n: unknown) => boolean = null, chk_msg: string = ""): number | string | boolean | Array<number | string | boolean> {
     for (let i in cfg) {
@@ -121,7 +131,7 @@ function get_config_value(cfg: Array<Array<number | string | boolean>>, name: st
                     throw new Error(`Config parameter '${name}': Only strings are supported`);
                 let res: Array<number | string | boolean> = cell_value.split(',');
                 if (array_length != -1 && res.length != array_length) {
-                    throw new Error(`Config parameter '${name}': Array length (${array_length}) differs from actual size(${res.length}`);
+                    throw new Error(`Config parameter '${name}': Array length (${array_length}) differs from actual size(${res.length})`);
                 }
                 for (let j = 0; j < array_length; j++) {
                     let val = (res[j] as string);
@@ -136,7 +146,7 @@ function get_config_value(cfg: Array<Array<number | string | boolean>>, name: st
                 let val = cfg[i][1];
                 if (typeof (val) != t)
                     throw new Error(`Data type for ${name} should be ${t} (now ${typeof (val)})`);
-                if(check && !check(val))
+                if (check && !check(val))
                     throw new Error(`Config parameter '${name}': ${chk_msg}`);
                 return val;
             }
@@ -148,9 +158,9 @@ function get_config_value(cfg: Array<Array<number | string | boolean>>, name: st
 
 function narrow_range(sheet: ExcelScript.Worksheet, range: string, width: number, err: string): string {
     let ir = sheet.getRange(range);
-    if(ir.getColumnCount() < width)
+    if (ir.getColumnCount() < width)
         throw new Error(`${err}: the range (${range}) shoud have at least ${width} columns for the given number of resource groups`);
-    let mrs = ir.getAbsoluteResizedRange(ir.getRowCount(), width).getAddress(). split('!');
+    let mrs = ir.getAbsoluteResizedRange(ir.getRowCount(), width).getAddress().split('!');
     let res = mrs[mrs.length - 1];
     return res;
 }
@@ -163,14 +173,12 @@ function getConfig(sheet: ExcelScript.Worksheet): Config {
     let cfg_data = read_config(sheet);
     let cfg = new Config();
 
-    /*
     function range_cellcount_is(count: number): (v: unknown) => boolean {
         return (v: unknown) => sheet.getRange(v as string).getCellCount() == count;
     }
-    */
 
     function range_width_is(width: number): (v: unknown) => boolean {
-        return (v: unknown) => sheet.getRange(v as string). getWidth() == width;
+        return (v: unknown) => sheet.getRange(v as string).getWidth() == width;
     }
 
     cfg.MESSAGE_CELL = get_config_value(cfg_data, "Message cell", "string") as string
@@ -225,7 +233,7 @@ function getConfig(sheet: ExcelScript.Worksheet): Config {
         }
 
         let out = "################## Configuration ##################";
-        for(let f in cfg) {
+        for (let f in cfg) {
             out += `\n${f}: ${cfg[f]}`;
         }
         out += "\n###################################################";
@@ -254,7 +262,7 @@ function linearise<T>(arr: T): Array<number | string | boolean> {
         for (let i in arr)
             linearise(arr[i]).forEach((v) => res.push(v))
     else
-        if(!(typeof(arr) == "string" && arr as string == ""))
+        if (!(typeof (arr) == "string" && arr as string == ""))
             res.push((arr as unknown as (number | string | boolean)))
     return res;
 }
@@ -307,6 +315,18 @@ function update(wb: ExcelScript.Workbook, cfg: Config) {
     for (let i = 0; i < cfg.RESOURCE_GROUPS; i++)
         burndown_data[day_idx][2 + cfg.RESOURCE_GROUPS + i] = current_estimates[i];
     burndown_data_range.setValues(burndown_data);
+
+
+    let charts = sheet.getCharts();
+    let lineChart: ExcelScript.Chart = null;
+    for (let c in charts) {
+        if (charts[c].getTitle().getText() == "Burndown") {
+            lineChart = charts[c];
+        }
+    }
+
+    _chart_update(sheet, lineChart, cfg)
+
     result(true, wb, cfg, "The UPDATE was successful!")
 }
 
@@ -330,6 +350,39 @@ function unlock(wb: ExcelScript.Workbook, cfg: Config) {
     result(true, wb, cfg, "Data unlocked");
 }
 
+
+function _chart_update(sheet: ExcelScript.Worksheet, lineChart: ExcelScript.Chart, cfg: Config) {
+    let numDays = ensure_number(sheet.getRange(cfg.SPRINT_LENGTH_CELL).getValue(), cfg.SPRINT_LENGTH_CELL);
+    let burndown_data_range = sheet.getRange(cfg.NARROW_SPRINT_BURNDOWN_DATA_RANGE);
+    let left_top = burndown_data_range.getCell(0, 0).getAddress();
+    let right_bottom = burndown_data_range.getCell(numDays, 1 + 2 * cfg.RESOURCE_GROUPS).getAddress();
+
+    let table_range_str = left_top + ":" + right_bottom;
+    if (lineChart === null)
+        lineChart = sheet.addChart(ExcelScript.ChartType.lineMarkers, sheet.getRange(table_range_str), ExcelScript.ChartSeriesBy.columns);
+    else
+        lineChart.setData(sheet.getRange(table_range_str));
+    lineChart.getTitle().setText("Burndown");
+
+    let series = lineChart.getSeries();
+
+    for (let rg = 0; rg < cfg.RESOURCE_GROUPS; rg++) {
+        let bs = series[rg + cfg.RESOURCE_GROUPS];
+        let ps = series[rg]
+        bs.setName(cfg.GROUP_NAMES[rg]);
+        ps.setName(cfg.GROUP_NAMES[rg] + ", plan");
+        let main_format = series[rg + cfg.RESOURCE_GROUPS].getFormat();
+        let main_line = main_format.getLine();
+        let planned_line = series[rg].getFormat().getLine();
+        main_line.setColor(get_color(rg, 1.0));
+        planned_line.setColor(get_color(rg, 2.9));
+        planned_line.setLineStyle(ExcelScript.ChartLineStyle.dot);
+        planned_line.setWeight(1);
+        bs.setMarkerForegroundColor(get_color(rg, 0.7));
+        ps.setMarkerStyle(ExcelScript.ChartMarkerStyle.none);
+        bs.setMarkerBackgroundColor(get_color(rg, 1.2));
+    }
+}
 
 function recalc(wb: ExcelScript.Workbook, cfg: Config) {
     let sheet = wb.getActiveWorksheet();
@@ -367,7 +420,7 @@ function recalc(wb: ExcelScript.Workbook, cfg: Config) {
         while (!isWorkingDay(currDate, (inverted_days as Array<number>)))
             currDate++;
         burndown_data[day][0] = day + 1;
-        burndown_data[day][1] = date_to_string(currDate);
+        burndown_data[day][1] = currDate; // date_to_string(currDate);
         for (let rg = 0; rg < cfg.RESOURCE_GROUPS; rg++) {
             burndown_data[day][2 + rg] = _r2(totalEstimates[rg] * (1. - day / numDays));
         }
@@ -383,32 +436,7 @@ function recalc(wb: ExcelScript.Workbook, cfg: Config) {
         }
     }
 
-    let left_top = burndown_data_range.getCell(0, 0).getAddress();
-    let right_bottom = burndown_data_range.getCell(numDays, 1 + 2 * cfg.RESOURCE_GROUPS).getAddress();
-    let table_range_str = left_top + ":" + right_bottom;
-    if (lineChart === null)
-        lineChart = sheet.addChart(ExcelScript.ChartType.lineMarkers, sheet.getRange(table_range_str), ExcelScript.ChartSeriesBy.columns);
-    else
-        lineChart.setData(sheet.getRange(table_range_str));
-    lineChart.getTitle().setText("Burndown");
-    let series = lineChart.getSeries();
-
-    for (let rg = 0; rg < cfg.RESOURCE_GROUPS; rg++) {
-        let bs = series[rg + cfg.RESOURCE_GROUPS];
-        let ps = series[rg]
-        bs.setName(cfg.GROUP_NAMES[rg]);
-        ps.setName(cfg.GROUP_NAMES[rg] + ", plan");
-        let main_format = series[rg + cfg.RESOURCE_GROUPS].getFormat();
-        let main_line = main_format.getLine();
-        let planned_line = series[rg].getFormat().getLine();
-        main_line.setColor(get_color(rg, 1.0));
-        planned_line.setColor(get_color(rg, 2.9));
-        planned_line.setLineStyle(ExcelScript.ChartLineStyle.dot);
-        planned_line.setWeight(1);
-        bs.setMarkerForegroundColor(get_color(rg, 0.7));
-        ps.setMarkerStyle(ExcelScript.ChartMarkerStyle.none);
-        bs.setMarkerBackgroundColor(get_color(rg, 1.2));
-    }
+    _chart_update(sheet, lineChart, cfg)
 
     let days_left_range = sheet.getRange(cfg.NARROW_DAYS_LEFT_RANGE);
 
@@ -456,28 +484,30 @@ async function sendPostRequest(url: string, data: unknown): Promise<unknown> {
 
 
 function read_range(sheet: ExcelScript.Worksheet, range: string): Array<Array<number | string | boolean>> {
-  return sheet.getRange(range).getValues();
+    return sheet.getRange(range).getValues();
 }
 
 function clear_cells(arr: Array<Array<number | string | boolean>>): Array<Array<number | string | boolean>> {
-    for(let skey in arr)
-        for(let ckey in arr[skey])
+    for (let skey in arr)
+        for (let ckey in arr[skey])
             arr[skey][ckey] = "";
     return arr;
 }
 
 function find_index(codes: Array<string>, val: string): number {
-    for(let i=0; i < codes.length; i++)
-        if(codes[i] == val)
+    for (let i = 0; i < codes.length; i++)
+        if (codes[i] == val)
             return i;
     return null;
 }
 
 function groups(row: Array<number | string | boolean>, cfg: Config, estimates: Object) {
-    for(let k in estimates) {
+    for (let k in estimates) {
         let i = find_index(cfg.GROUP_CODES, k);
-        if(i!=null)
-            if(estimates[k])
+        if (i != null)
+            if(estimates[k] == "?")
+                row[i] = "?";
+            else if (estimates[k])
                 row[i] = +estimates[k];
             else
                 row[i] = '';
@@ -492,6 +522,7 @@ async function from_jira(wb: ExcelScript.Workbook, cfg: Config) {
     let keys = clear_cells(sheet.getRange(cfg.ISSUE_KEYS_RANGE).getValues());
     let scope = clear_cells(sheet.getRange(cfg.NARROW_SPRINT_SCOPE_RANGE).getValues());
     let remaining = clear_cells(sheet.getRange(cfg.NARROW_ISSUE_REMAINING_ESTIMATES_RANGE).getValues());
+    let postponed = clear_cells(sheet.getRange(cfg.NARROW_POSTPONED_RANGE).getValues());
     let prefixes = clear_cells(sheet.getRange(cfg.PREFIX_RANGE).getValues());
     let resolved = clear_cells(sheet.getRange(cfg.RESOLVED_RANGE).getValues());
     let assignee = clear_cells(sheet.getRange(cfg.ASSIGNEES_RANGE).getValues());
@@ -500,22 +531,24 @@ async function from_jira(wb: ExcelScript.Workbook, cfg: Config) {
         'resource_groups': cfg.GROUP_CODES,
     };
     let res: Object = await sendPostRequest(cfg.JIRA_PROXY + '/query_issues', data) as Object;
-    if(res) {
-        for(let k=0; k < res["issues"].length; k++) {
+    if (res) {
+        for (let k = 0; k < res["issues"].length; k++) {
             let issue = res["issues"][k] as Object;
             //sort_values[k][0] =
             keys[k][0] = issue["key"] as string;
             prefixes[k][0] = issue["prefix"] as string;
             summaries[k][0] = issue["summary"] as string;
-            resolved[k][0] = issue["resolution"] ? "+": "";
+            resolved[k][0] = issue["resolution"] ? "+" : "";
             assignee[k][0] = issue["assignee"] as string;
             groups(scope[k], cfg, issue["estimates"]);
             groups(remaining[k], cfg, issue["remaining_estimates"]);
+            groups(postponed[k], cfg, issue["postponed"]);
         }
         sheet.getRange(cfg.SUMMARIES_RANGE).setValues(summaries);
         sheet.getRange(cfg.ISSUE_KEYS_RANGE).setValues(keys);
         sheet.getRange(cfg.NARROW_SPRINT_SCOPE_RANGE).setValues(scope);
         sheet.getRange(cfg.NARROW_ISSUE_REMAINING_ESTIMATES_RANGE).setValues(remaining);
+        sheet.getRange(cfg.NARROW_POSTPONED_RANGE).setValues(postponed);
         sheet.getRange(cfg.PREFIX_RANGE).setValues(prefixes);
         sheet.getRange(cfg.RESOLVED_RANGE).setValues(resolved);
         sheet.getRange(cfg.ASSIGNEES_RANGE).setValues(assignee);
@@ -532,6 +565,12 @@ function gather_estimates(estimates: Array<number | string | boolean>, cfg: Conf
             if (ii < cfg.GROUP_CODES.length)
                 res[cfg.GROUP_CODES[ii]] = estimates[ii];
     }
+    let out = "";
+    for (let f in res) {
+        out += `\n${f}: ${res[f]}`;
+    }
+    out += "\n";
+    msg(out);
     return res;
 }
 
@@ -543,22 +582,25 @@ async function to_jira(wb: ExcelScript.Workbook, cfg: Config) {
     let keys = sheet.getRange(cfg.ISSUE_KEYS_RANGE).getValues();
     let scope = sheet.getRange(cfg.NARROW_SPRINT_SCOPE_RANGE).getValues();
     let remaining = sheet.getRange(cfg.NARROW_ISSUE_REMAINING_ESTIMATES_RANGE).getValues();
+    let postponed = sheet.getRange(cfg.NARROW_POSTPONED_RANGE).getValues();
     let prefixes = sheet.getRange(cfg.PREFIX_RANGE).getValues();
     let resolved = sheet.getRange(cfg.RESOLVED_RANGE).getValues();
 
     let issues: Array<Object> = [];
     //msg(`KEYS ${keys.length}:${keys[0][0]}`);
-    for( let i=0; i < keys.length && keys[i][0].toString() != ""; i++) {
+    for (let i = 0; i < keys.length && keys[i][0].toString() != ""; i++) {
         //msg(`${keys[i][0]}: `);
         let e = gather_estimates(scope[i], cfg);
         let re = gather_estimates(remaining[i], cfg);
+        let po = gather_estimates(postponed[i], cfg);
         let prefix = prefixes[i][0] as string;
-        if(prefix.length > 3)
-            prefix = prefix.substring(0,3);
+        if (prefix.length > 3)
+            prefix = prefix.substring(0, 3);
         issues.push({
             key: keys[i][0],
             estimates: e,
             remaining_estimates: re,
+            postponed: po,
             summary: summaries[i][0],
             prefix: prefix
         });
@@ -566,6 +608,7 @@ async function to_jira(wb: ExcelScript.Workbook, cfg: Config) {
     let data = {
         'jql': cfg.JQL,
         'issues': issues,
+        'resource_groups': cfg.GROUP_CODES,
     };
     let res: Object = await sendPostRequest(cfg.JIRA_PROXY + '/update_issues', data) as Object;
     result(true, wb, cfg, `Updated: ${res["updated_keys"]}`);
@@ -577,7 +620,7 @@ function fill_range(sheet: ExcelScript.Worksheet, range: string, row: Array<stri
     r.setValues(matrix);
 }
 
-function clear_range(sheet:ExcelScript.Worksheet, range: string) {
+function clear_range(sheet: ExcelScript.Worksheet, range: string) {
     let r = sheet.getRange(range);
     fill_range(sheet, range, new Array(r.getColumnCount()).fill(""));
 }
@@ -586,25 +629,25 @@ function setup(wb: ExcelScript.Workbook, cfg: Config) {
     let sheet = wb.getActiveWorksheet();
     for (let i in cfg.WIDE_GROUP_NAMES_RANGES)
         clear_range(sheet, cfg.WIDE_GROUP_NAMES_RANGES[i]);
-    for(let i in cfg.NARROW_GROUP_NAMES_RANGES)
+    for (let i in cfg.NARROW_GROUP_NAMES_RANGES)
         fill_range(sheet, cfg.NARROW_GROUP_NAMES_RANGES[i], cfg.GROUP_NAMES);
     clear_range(sheet, cfg.WIDE_SPRINT_BURNDOWN_HEADER_RANGE);
     let bth_hdr = ["#", "Date"];
-    for(let i in cfg.GROUP_CODES)
-        bth_hdr.push(cfg.GROUP_CODES[i]+", plan")
+    for (let i in cfg.GROUP_CODES)
+        bth_hdr.push(cfg.GROUP_CODES[i] + ", plan")
     for (let i in cfg.GROUP_CODES)
         bth_hdr.push(cfg.GROUP_CODES[i]);
     sheet.getRange(cfg.NARROW_SPRINT_BURNDOWN_HEADER_RANGE).setValues([bth_hdr]);
 
     let ranges = [sheet.getRange(cfg.WIDE_SPRINT_SCOPE_RANGE), sheet.getRange(cfg.WIDE_ISSUE_REMAINING_ESTIMATES_RANGE), sheet.getRange(cfg.WIDE_POSTPONED_RANGE)];
     let width = 0;
-    for(let i=0; i < ranges.length; i++){
+    for (let i = 0; i < ranges.length; i++) {
         let range = sheet.getRange(cfg.WIDE_GROUP_NAMES_RANGES[i]);
         let nrange_size = sheet.getRange(cfg.NARROW_GROUP_NAMES_RANGES[i]).getColumnCount();
-        if(i != 0)
+        if (i != 0)
             range.getCell(0, -1).getFormat().setColumnWidth(0);
         let cols = range.getColumnCount();
-        for(let j=0; j < cols; j++) {
+        for (let j = 0; j < cols; j++) {
             let gname_cell = range.getCell(0, j);
             let focus_cell = gname_cell.getCell(1, 0);
             let mul_cell = gname_cell.getCell(2, 0);

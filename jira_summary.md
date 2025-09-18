@@ -1,4 +1,4 @@
-Прошу прощения за упущение. Давайте включим вторую задачу в техническое задание.
+Понял, давайте добавим тесты для ситуации, когда некоторые группы могут отсутствовать в словарях `estimates`, `remaining_estimates` и `postponed`, в спецификацию.
 
 ### Technical Specification for `parse_summary` and `encode_summary` Functions
 
@@ -181,6 +181,7 @@ abc[10A+20M](30A+40M){50A+60M}Some summary text
    - For `prefix` and `summary`, use an empty string as the default value.
    - For `estimates`, use `?` for each group as the default value.
    - For `remaining_estimates` and `postponed`, use `0` for each group as the default value.
+9. Ensure that the `encode_block` function handles cases where some groups may be missing from the dictionary.
 
 #### Examples of Dictionaries and Expected Results:
 
@@ -312,10 +313,41 @@ abc[10A](30A){50A}Some summary text
 abc[10A](30A){50A}Some summary text
 ```
 
+##### Example 9: Missing groups in dictionaries
+**Dictionary:**
+```python
+{
+    'prefix': 'abc',
+    'estimates': {'A': 10, 'B': 20},
+    'remaining_estimates': {'A': 30, 'B': 40},
+    'postponed': {'A': 50, 'B': 60},
+    'summary': 'Some summary text'
+}
+```
+**Expected Result:**
+```
+abc[10A+20B](30A+40B){50A+60B}Some summary text
+```
+
+**Dictionary:**
+```python
+{
+    'prefix': 'abc',
+    'estimates': {'A': 10},
+    'remaining_estimates': {'A': 30},
+    'postponed': {'A': 50},
+    'summary': 'Some summary text'
+}
+```
+**Expected Result:**
+```
+abc[10A](30A){50A}Some summary text
+```
+
 #### Round-trip Test:
 The following test ensures that the original dictionary, when encoded and then parsed, will be equal to the result.
 
-##### Example 9: Round-trip test
+##### Example 10: Round-trip test
 **Dictionary:**
 ```python
 {
@@ -403,29 +435,4 @@ parse_summary(['A', 'B', 'C'], encode_summary(['A', 'B', 'C'], summary_dict)) ==
 ```
 **Expected Result:**
 ```python
-parse_summary(['A', 'B', 'C'], encode_summary(['A', 'B', 'C'], summary_dict)) == summary_dict
-```
-
-**Dictionary:**
-```python
-{
-    'prefix': 'abc',
-    'estimates': {'A': 10, 'B': 0, 'C': 0},
-    'remaining_estimates': {'A': 30, 'B': 0, 'C': 0},
-    'postponed': {'A': 50, 'B': 0, 'C': 0},
-    'summary': 'Some summary text'
-}
-```
-**Expected Result:**
-```python
-parse_summary(['A', 'B', 'C'], encode_summary(['A', 'B', 'C'], summary_dict)) == summary_dict
-```
-
-**Dictionary:**
-```python
-{
-    'prefix': 'abc',
-    'estimates': {'A': 10, 'B': 0, 'C': 0},
-    'remaining_estimates': {'A': 30, 'B': 0, 'C': 0},
-    'postponed': {'A': 50, 'B': 0, 'C': 0},
-    'summary': 'Some summary text'
+parse_summary(['A', 'B', 'C'], encode_summary
