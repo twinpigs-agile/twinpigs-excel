@@ -1,1 +1,1 @@
-C:\Users\EME026\AppData\Local\Programs\Python\Python310\Scripts\pyinstaller.exe --onefile jiraproxy.py
+venv\Scripts\pyinstaller.exe --onefile twinpigs_jira_driver.py
