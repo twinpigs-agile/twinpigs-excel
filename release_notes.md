@@ -1,5 +1,15 @@
 # Twin Pigs Jira Driver Release Notes
 
+## Version: 5.1
+
+### Changes:
+1. **Compatibility check for Jira Driver and Calculator versions**:
+   - Since now, incompatible versions do not work together, TO JIRA/FROM JIRA gives an error. No data corruption happens in that case.
+
+2. **Errors processing**:
+   - Now exception strings are returned with code 200, not 400. That allows the Excel script to process results and show correct status.
+
+
 ## Version: 5.0
 
 ### Changes:

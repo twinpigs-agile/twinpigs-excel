@@ -1,3 +1,5 @@
+let SCRIPT_VERSION = 5;
+
 let DEBUG = true;
 
 let BASE_COLORS = [[0x00, 0xaa, 0xe8], [0xa0, 0x2b, 0x93], [0x4e, 0xa7, 0x2e], [0xeb, 0x11, 0x11], [0x11, 0x60, 0x11], [0x60, 0x11, 0x11]];
@@ -529,30 +531,35 @@ async function from_jira(wb: ExcelScript.Workbook, cfg: Config) {
     let data = {
         'jql': cfg.JQL,
         'resource_groups': cfg.GROUP_CODES,
+        'version': SCRIPT_VERSION,
     };
     let res: Object = await sendPostRequest(cfg.JIRA_PROXY + '/query_issues', data) as Object;
     if (res) {
-        for (let k = 0; k < res["issues"].length; k++) {
-            let issue = res["issues"][k] as Object;
-            //sort_values[k][0] =
-            keys[k][0] = issue["key"] as string;
-            prefixes[k][0] = issue["prefix"] as string;
-            summaries[k][0] = issue["summary"] as string;
-            resolved[k][0] = issue["resolution"] ? "+" : "";
-            assignee[k][0] = issue["assignee"] as string;
-            groups(scope[k], cfg, issue["estimates"]);
-            groups(remaining[k], cfg, issue["remaining_estimates"]);
-            groups(postponed[k], cfg, issue["postponed"]);
+        if('error' in res)
+            result(false, wb, cfg, res["error"])
+        else{
+            for (let k = 0; k < res["issues"].length; k++) {
+                let issue = res["issues"][k] as Object;
+                //sort_values[k][0] =
+                keys[k][0] = issue["key"] as string;
+                prefixes[k][0] = issue["prefix"] as string;
+                summaries[k][0] = issue["summary"] as string;
+                resolved[k][0] = issue["resolution"] ? "+" : "";
+                assignee[k][0] = issue["assignee"] as string;
+                groups(scope[k], cfg, issue["estimates"]);
+                groups(remaining[k], cfg, issue["remaining_estimates"]);
+                groups(postponed[k], cfg, issue["postponed"]);
+            }
+            sheet.getRange(cfg.SUMMARIES_RANGE).setValues(summaries);
+            sheet.getRange(cfg.ISSUE_KEYS_RANGE).setValues(keys);
+            sheet.getRange(cfg.NARROW_SPRINT_SCOPE_RANGE).setValues(scope);
+            sheet.getRange(cfg.NARROW_ISSUE_REMAINING_ESTIMATES_RANGE).setValues(remaining);
+            sheet.getRange(cfg.NARROW_POSTPONED_RANGE).setValues(postponed);
+            sheet.getRange(cfg.PREFIX_RANGE).setValues(prefixes);
+            sheet.getRange(cfg.RESOLVED_RANGE).setValues(resolved);
+            sheet.getRange(cfg.ASSIGNEES_RANGE).setValues(assignee);
+            result(true, wb, cfg, "Jira import: done.");
         }
-        sheet.getRange(cfg.SUMMARIES_RANGE).setValues(summaries);
-        sheet.getRange(cfg.ISSUE_KEYS_RANGE).setValues(keys);
-        sheet.getRange(cfg.NARROW_SPRINT_SCOPE_RANGE).setValues(scope);
-        sheet.getRange(cfg.NARROW_ISSUE_REMAINING_ESTIMATES_RANGE).setValues(remaining);
-        sheet.getRange(cfg.NARROW_POSTPONED_RANGE).setValues(postponed);
-        sheet.getRange(cfg.PREFIX_RANGE).setValues(prefixes);
-        sheet.getRange(cfg.RESOLVED_RANGE).setValues(resolved);
-        sheet.getRange(cfg.ASSIGNEES_RANGE).setValues(assignee);
-        result(true, wb, cfg, "Jira import: done.");
     } else
         result(false, wb, cfg, "Jira import: failed to get data.");
 }
@@ -565,12 +572,6 @@ function gather_estimates(estimates: Array<number | string | boolean>, cfg: Conf
             if (ii < cfg.GROUP_CODES.length)
                 res[cfg.GROUP_CODES[ii]] = estimates[ii];
     }
-    let out = "";
-    for (let f in res) {
-        out += `\n${f}: ${res[f]}`;
-    }
-    out += "\n";
-    msg(out);
     return res;
 }
 
@@ -609,9 +610,13 @@ async function to_jira(wb: ExcelScript.Workbook, cfg: Config) {
         'jql': cfg.JQL,
         'issues': issues,
         'resource_groups': cfg.GROUP_CODES,
+        'version': SCRIPT_VERSION,
     };
     let res: Object = await sendPostRequest(cfg.JIRA_PROXY + '/update_issues', data) as Object;
-    result(true, wb, cfg, `Updated: ${res["updated_keys"]}`);
+    if ('error' in res)
+        result(false, wb, cfg, res["error"])
+    else
+        result(true, wb, cfg, `Updated: ${res["updated_keys"]}`);
 }
 
 function fill_range(sheet: ExcelScript.Worksheet, range: string, row: Array<string>) {

@@ -12,7 +12,8 @@ from base64 import b64encode
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
-
+SCRIPT_VERSION = 5
+DRIVER_VERSION = '5.1'
 
 
 ################################# THE PARSER/ENCODER GENERATED BLOCK #################################
@@ -235,64 +236,81 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.end_headers()
 
     async def handle_query_issues(self, data):
-        jql = data.get('jql', '')
-        resource_groups = data.get('resource_groups', [])
-        if not jql:
-            self.send_response(400)
+        try:
+            jql = data.get('jql', '')
+            if data.get('version', 0) != SCRIPT_VERSION:
+                raise Exception(f"Jira integrator v{SCRIPT_VERSION} is not compatible with the Twin Pigs Jira Driver v{DRIVER_VERSION}")
+            resource_groups = data.get('resource_groups', [])
+            if not jql:
+                self.send_response(400)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(json.dumps({'error': 'Missing jql parameter'}).encode('utf-8'))
+                return
+
+            query_params = urlencode({'jql': jql, 'maxResults': 1000})
+            jira_url = f'{self.server.jira_server}/rest/api/2/search?{query_params}'
+            response = await self.call_external_api(jira_url)
+
+            # Parsing the Jira request results
+            processed_response = self.process_jira_response(response, resource_groups)
+
+            logging.info(f"Processed response for query_issues: {processed_response}")
+
+            self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
-            self.wfile.write(json.dumps({'error': 'Missing jql parameter'}).encode('utf-8'))
+            self.wfile.write(json.dumps(processed_response).encode('utf-8'))
+        except Exception as e:
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
+            logging.error(f"{str(e)}")
             return
-
-        query_params = urlencode({'jql': jql, 'maxResults': 1000})
-        jira_url = f'{self.server.jira_server}/rest/api/2/search?{query_params}'
-        response = await self.call_external_api(jira_url)
-
-        # Parsing the Jira request results
-        processed_response = self.process_jira_response(response, resource_groups)
-
-        logging.info(f"Processed response for query_issues: {processed_response}")
-
-        self.send_response(200)
-        self.send_header('Content-Type', 'application/json')
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.end_headers()
-        self.wfile.write(json.dumps(processed_response).encode('utf-8'))
 
     async def handle_update_issues(self, data):
-        issues = data.get('issues', [])
-        jql = data.get('jql', '')
-        resource_groups = data.get('resource_groups', [])
+        try:
+            issues = data.get('issues', [])
+            jql = data.get('jql', '')
+            if data.get('version', 0) != SCRIPT_VERSION:
+                raise Exception(f"Jira integrator v{SCRIPT_VERSION} is not compatible with the Twin Pigs Jira Driver v{DRIVER_VERSION}")
+            resource_groups = data.get('resource_groups', [])
 
-        if not issues or not jql:
-            self.send_response(400)
+            if not issues or not jql:
+                raise Exception('Missing issues or jql parameter')
+
+            input_summaries = {issue['key']: encode_summary(resource_groups, issue)for issue in issues}
+
+            query_params = urlencode({'jql': jql, 'maxResults': 1000})
+            jira_url = f'{self.server.jira_server}/rest/api/2/search?{query_params}'
+            response = await self.call_external_api(jira_url)
+            jira_summaries = {issue['key']: issue['fields']['summary'] for issue in response.get('issues', [])}
+
+            keys_to_update = [key for key, summary in input_summaries.items() if
+                              key not in jira_summaries or jira_summaries[key] != summary]
+
+            for key in keys_to_update:
+                await self.update_jira_summary(key, input_summaries[key])
+
+            logging.info(f"Updated keys: {keys_to_update}")
+
+            self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
-            self.wfile.write(json.dumps({'error': 'Missing issues or jql parameter'}).encode('utf-8'))
+            self.wfile.write(json.dumps({'updated_keys': keys_to_update}).encode('utf-8'))
+        except Exception as e:
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
+            logging.error(f"{str(e)}")
             return
-
-        input_summaries = {issue['key']: encode_summary(resource_groups, issue)for issue in issues}
-
-        query_params = urlencode({'jql': jql, 'maxResults': 1000})
-        jira_url = f'{self.server.jira_server}/rest/api/2/search?{query_params}'
-        response = await self.call_external_api(jira_url)
-        jira_summaries = {issue['key']: issue['fields']['summary'] for issue in response.get('issues', [])}
-
-        keys_to_update = [key for key, summary in input_summaries.items() if
-                          key not in jira_summaries or jira_summaries[key] != summary]
-
-        for key in keys_to_update:
-            await self.update_jira_summary(key, input_summaries[key])
-
-        logging.info(f"Updated keys: {keys_to_update}")
-
-        self.send_response(200)
-        self.send_header('Content-Type', 'application/json')
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.end_headers()
-        self.wfile.write(json.dumps({'updated_keys': keys_to_update}).encode('utf-8'))
 
     def get_headers(self):
         return {
@@ -371,7 +389,7 @@ def run(jira_server, port, token, user, password):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
-        description='Jira Driver for Twin Pigs Sprint Calculator v5.0')
+        description=f'Jira Driver for Twin Pigs Sprint Calculator v{DRIVER_VERSION}')
     parser.add_argument('--port', type=int, default=8080, help='Specify the HTTP port to listen')
     parser.add_argument('--token', type=str, help='Jira API personal access token to use API (the recommended wat of authentication)')
     parser.add_argument('--user', type=str, help='Username for basic Jira API auth (kept for old Jira versions)')
